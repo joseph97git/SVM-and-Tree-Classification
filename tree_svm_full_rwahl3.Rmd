@@ -1,0 +1,170 @@
+---
+title: "Final Project"
+author: "Ryan Wahl"
+date: "April 29, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tree)
+library(tidyr)
+library(rpart.plot)
+library(pander)
+library(grDevices)
+set.seed(1234)
+```
+
+##Trees!
+
+```{r}
+#setwd("C:/Users/Ryan/OneDrive/VT Spring 2019/Intermediate Data Analytics and ML/Final project")
+
+# DUE TO SIZE WE DID NOT UPLOAD THE DATA TO CANVAS BUT YOU CAN FIND IT IN THE LINK BELOW
+# https://www.kaggle.com/ndalziel/massachusetts-public-schools-data/version/1
+ 
+publicschooldata <- read.csv(file = "MA_Public_Schools_2017.csv")
+
+##Removing columns that have x > 15% NA values
+cleaned_MPS <- publicschooldata[, colMeans(is.na(publicschooldata)) <= .15]
+
+##Removing rows that still have NA values
+cleaned_nona_MPA <- na.omit(cleaned_MPS)
+
+##Removing unnecessary columns...
+##School.Code, School.Name, School.Type, Function, Contact.Name, Address.1, Address.2, Town, State, Zip, Phone, Fax, District Name, District Code
+MPS_final <- cleaned_nona_MPA[, -c(1:12, 14:15)]
+
+##Removing grade column because it has too many factors
+MPS_final_nograde <- MPS_final[,-1]
+
+##Making the AP Test numbers numeric
+MPS_final_nograde$AP_Test.Takers <- as.numeric(MPS_final_nograde$AP_Test.Takers)
+MPS_final_nograde$AP_Tests.Taken <- as.numeric(MPS_final_nograde$AP_Tests.Taken)
+
+##Blanks got filled with 1, replacing the 1s with 0s
+MPS_final_nograde$AP_Test.Takers[MPS_final_nograde$AP_Test.Takers == 1] <- 0
+MPS_final_nograde$AP_Tests.Taken[MPS_final_nograde$AP_Tests.Taken == 1] <- 0
+
+##Removing columns very closely related to response
+MPS_final_nograde <- MPS_final_nograde[,-c(50, 51, 54)]
+
+#Removing factor levels "" and "Insufficient Data"
+MPS_final_nograde$District_Accountability.and.Assistance.Level <- factor(MPS_final_nograde$District_Accountability.and.Assistance.Level)
+
+##Splitting into testing and training data
+n = length(MPS_final_nograde$PK_Enrollment)
+trainIDX = sample(1:n, round(.7*n))
+train = MPS_final_nograde[trainIDX,]
+test = MPS_final_nograde[-trainIDX,]
+```
+
+```{r}
+##Creating the full tree
+MPStree <- tree(District_Accountability.and.Assistance.Level ~ ., data = train, mincut = 5)
+plot(MPStree, lwd = 2)
+text(MPStree, cex = .5)
+summary(MPStree)
+
+##Creating the full tree using rpart
+rpartFullTree <- rpart(District_Accountability.and.Assistance.Level ~ .,data=train,control=rpart.control(minsplit=5))
+prp(rpartFullTree)
+printcp(rpartFullTree)
+```
+
+```{r}
+#Pruning the tree
+MPS_snip <- snip.tree(MPStree, c(4, 12))
+plot(MPS_snip, lwd = 2)
+text(MPS_snip, cex = .7)
+summary(MPS_snip)
+
+#Pruning rpart tree
+rpart_snip <- snip.rpart(rpartFullTree, c(7, 8, 9, 10))
+prp(rpart_snip)
+printcp(rpart_snip)
+```
+
+```{r}
+#Using CV to get the best tree
+MPS_tree_cv = cv.tree(MPStree, K = 90)
+plot(MPS_tree_cv)
+
+MPS_tree_prune <- prune.tree(MPStree, best = 16)
+plot(MPS_tree_prune)
+text(MPS_tree_prune)
+summary(MPS_tree_prune)
+```
+
+```{r}
+#Comparing all of the models...
+
+#Full tree
+fullPredict <- predict(MPStree, newdata=test, type="class")
+fullFalse <- fullPredict != test$District_Accountability.and.Assistance.Level
+tableFullFalse <- mean(fullFalse)
+
+#Pruned tree
+prunePredict <- predict(MPS_snip, newdata=test, type="class")
+pruneFalse <- prunePredict != test$District_Accountability.and.Assistance.Level
+tablePruneFalse <- mean(pruneFalse) 
+
+#CV tree
+cvPredict <- predict(MPS_tree_prune, newdata=test, type="class")
+cvFalse <- cvPredict != test$District_Accountability.and.Assistance.Level
+tableCVFalse <- mean(cvFalse)
+
+#Full rpart tree
+fullRPartPredict <- predict(rpartFullTree, newdata=test, type="class")
+fullRPartFalse <- fullRPartPredict != test$District_Accountability.and.Assistance.Level
+tableFullRPartFalse <- mean(fullRPartFalse) 
+
+#Pruned rpart tree
+prunedRPartPredict <- predict(rpart_snip, newdata=test, type="class")
+prunedRPartFalse <- prunedRPartPredict != test$District_Accountability.and.Assistance.Level
+tablePrunedRPartFalse <- mean(prunedRPartFalse)
+```
+
+```{r}
+#Table of prediction error for various trees
+titles = c("Full tree", "Pruned Tree", "CV Tree", "Rpart Full Tree", "Rpart Pruned Tree")
+error = c(tableFullFalse, tablePruneFalse, tableCVFalse, tableFullRPartFalse, tablePrunedRPartFalse)
+pandoc.table(cbind("Tree type" = titles,"Out of sample misclassification error" = error))
+```
+
+##SVM!
+
+```{r}
+library(caret)
+trctrl <- trainControl(method = "repeatedcv", number = 5)
+
+svm_Linear <- train(District_Accountability.and.Assistance.Level ~ ., data = train, method = "svmLinear",
+                 trControl=trctrl,
+                 tuneLength = 5)
+
+test_Pred <- predict(svm_Linear, newdata = test)
+confusionMatrix(test_Pred, test$District_Accountability.and.Assistance.Level)
+
+grid <- expand.grid(C = c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,5))
+svm_Linear_Grid <- train(District_Accountability.and.Assistance.Level ~ ., data = train, method = "svmLinear",
+                    trControl=trctrl,
+                    tuneGrid = grid,
+                    tuneLength = 10)
+
+plot(svm_Linear_Grid)
+
+test_pred_grid <- predict(svm_Linear_Grid, newdata = test)
+confusionMatrix(test_pred_grid, test$District_Accountability.and.Assistance.Level)
+
+grid <- expand.grid(C = c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,5), sigma = c(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2,5))
+
+svm_Radial <- train(District_Accountability.and.Assistance.Level ~ ., data = train, method = "svmRadial",
+  trControl=trctrl,
+  tuneGrid = grid,
+  tuneLength = 10)
+
+plot(svm_Radial)
+
+test_pred_Radial <- predict(svm_Radial, newdata = test)
+confusionMatrix(test_pred_Radial, test$District_Accountability.and.Assistance.Level)
+```

@@ -1,0 +1,74 @@
+---
+title: "Example Code"
+author: "Joseph Kim"
+date: "April 29, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(Sleuth3)
+library(ggplot2)
+
+# data preprocessing 
+df <- ex0722[ex0722$Species != "Lophopanopeus bellus",]
+
+# create plot
+plot <- ggplot(df, aes(Height, Force, col=Species)) + geom_point(size=4) + theme_minimal(base_size = 15) + ggtitle("Claw Force vs. Claw Height")
+
+# saving plot as image
+# png('ex0722_class.png', width = 750*0.8, height = 500*0.8)
+# plot
+# dev.off()
+
+# plot
+```
+
+```{r}
+library(kernlab)
+library(RWeka)
+library(LiblineaR)
+library(e1071)
+
+x <- cbind(df$Height, df$Force)
+y <- df$Species
+smo_fit <- ksvm(x, y,type="C-svc",C = 100, kernel="vanilladot",scaled=c())
+smo_stat <- SMO(Species ~., data = df)
+#smo_opt <- svm(x = cbind(df$Height, df$Force), y = df$Species, kernel = "linear")
+```
+
+```{r}
+# recover parameters from alpha values
+w <- colSums(coef(smo_fit)[[1]] * x[SVindex(smo_fit),])
+b <- b(smo_fit)
+```
+
+```{r}
+library(ggplot2)
+library(latex2exp)
+
+# plot svm decision boundary
+svm_plot <- ggplot(df, aes(Height, Force, col=Species)) + geom_point(size=4) + theme_minimal(base_size = 15) + ggtitle("Claw Force vs. Claw Height") + geom_abline(slope = -w[1]/w[2], intercept = b/w[2]) + geom_abline(slope = -w[1]/w[2], intercept = (b+1)/w[2], linetype = 2) + geom_abline(slope = -w[1]/w[2], intercept = (b-1)/w[2], linetype = 2) + annotate("text", x = 5.3, y = 17, label = TeX("$\\mathbf{w}^t\\mathbf{x}+b = 1$")) + annotate("text", x = 5.3, y = 12.5, label = TeX("$\\mathbf{w}^t\\mathbf{x}+b = 0$")) + annotate("text", x = 5.3, y = 8, label = TeX("$\\mathbf{w}^t\\mathbf{x}+b = -1$"))
+
+# saving plot as image
+# png('ex0722_svm.png', width = 750*0.8, height = 500*0.8)
+# svm_plot
+# dev.off()
+
+svm_plot
+```
+
+```{r}
+summary(smo_stat)
+```
+
+```{r}
+library(kableExtra)
+confusion_matrix <- data.frame("Cancer productus (Predicted)" = c(10, 0), "Hemigrapsus nudus (Predicted)" = c(2, 14))
+rownames(confusion_matrix) <- c("Cancer productus (Actual)", "Hemigrapsus nudus (Actual)")
+kable(confusion_matrix, "latex")
+```
+
